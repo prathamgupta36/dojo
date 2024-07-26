@@ -37,11 +37,12 @@ HOST_HOMES = pathlib.Path(HOST_DATA_PATH) / "homes"
 HOST_HOMES_NOSUID = HOST_HOMES / "nosuid"
 HOST_HOMES_OVERLAY = HOST_HOMES / "overlay"
 
-HOMES = pathlib.Path("/var/homes")
-HOMEFS = HOMES / "homefs"
-HOMES_DATA = HOMES / "data"
-HOMES_NOSUID = HOMES / "nosuid"
-HOMES_OVERLAY = HOMES / "overlay"
+def start_challenge(user, dojo_challenge, practice, custom_flag):
+    def setup_home(user):
+        homes = pathlib.Path("/var/homes")
+        homefs = homes / "homefs"
+        user_data = homes / "data" / str(user.id)
+        user_nosuid = homes / "nosuid" / random_home_path(user)
 
 def setup_home(user):
     HOMES_DATA.mkdir(exist_ok=True)
@@ -236,6 +237,13 @@ def get_mount_info(container, path):
         raise RuntimeError("Home directory failed to mount")
     return output
 
+    def get_custom_flag():
+        return custom_flag
+
+    def insert_challenge(user, dojo_challenge):
+        def is_option_path(path):
+            path = pathlib.Path(*path.parts[:len(dojo_challenge.path.parts) + 1])
+            return path.name.startswith("_") and path.is_dir()
 
 def assert_nosuid(container, mount_info):
     if b"nosuid" not in mount_info:
@@ -249,7 +257,11 @@ def insert_challenge(container, as_user, dojo_challenge):
         path = pathlib.Path(*path.parts[: len(dojo_challenge.path.parts) + 1])
         return path.name.startswith("_") and path.is_dir()
 
-    exec_run("/run/current-system/sw/bin/mkdir -p /challenge", container=container)
+    def insert_flag(flag, custom_flag):
+        if custom_flag != None:
+            exec_run(f"echo '{flag}' > /flag", container=container, shell=True)
+        else:
+            exec_run(f"echo 'pwn.college{{{flag}}}' > /flag", container=container, shell=True)
 
     root_dir = dojo_challenge.path.parent.parent
     challenge_tar = resolved_tar(
@@ -356,15 +368,16 @@ def start_challenge(user, dojo_challenge, practice, *, as_user=None):
     if practice:
         grant_sudo(container)
 
-    insert_challenge(container, as_user, dojo_challenge)
+    insert_challenge(user, dojo_challenge)
+    
+    if custom_flag is not None:
+        flag = None
+    else: 
+        custom_flag = None
+        flag = "practice" if practice else serialize_user_flag(user.id, dojo_challenge.challenge_id)
 
-    if practice:
-        flag = "practice"
-    elif as_user != user:
-        flag = "support_flag"
-    else:
-        flag = serialize_user_flag(as_user.id, dojo_challenge.challenge_id)
-    insert_flag(container, flag)
+    # flag = "practice" if practice else serialize_user_flag(user.id, dojo_challenge.challenge_id)
+    insert_flag(flag, custom_flag)
 
     auth_token = container.labels["dojo.auth_token"]
     insert_auth_token(container, auth_token)
@@ -381,6 +394,13 @@ class RunDocker(Resource):
         module_id = data.get("module")
         challenge_id = data.get("challenge")
         practice = data.get("practice")
+        
+        ### custom flag #####
+        if(hasattr(data, "custom_flag")):
+            custom_flag = data.get("custom_flag")
+        else:
+            custom_flag = None
+        ######################
 
         user = get_current_user()
         as_user = None
@@ -422,7 +442,7 @@ class RunDocker(Resource):
             }
 
         try:
-            start_challenge(user, dojo_challenge, practice, as_user=as_user)
+            start_challenge(user, dojo_challenge, practice, custom_flag)
         except RuntimeError as e:
             logger.exception(f"ERROR: Docker failed for {user.id}:")
             return {"success": False, "error": str(e)}

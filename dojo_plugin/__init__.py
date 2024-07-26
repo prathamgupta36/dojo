@@ -15,6 +15,7 @@ from CTFd.plugins import register_admin_plugin_menu_bar
 from CTFd.plugins.challenges import CHALLENGE_CLASSES, BaseChallenge
 from CTFd.plugins.flags import FLAG_CLASSES, BaseFlag, FlagException
 
+from .api.v1.docker import get_custom_flag
 from .models import Dojos, DojoChallenges, Belts, Emojis
 from .config import DOJO_HOST, bootstrap
 from .utils import unserialize_user_flag, render_markdown
@@ -53,7 +54,13 @@ class DojoFlag(BaseFlag):
         current_challenge_id = chal_key_obj.challenge_id
 
         try:
-            account_id, challenge_id = unserialize_user_flag(provided)
+            custom_flag = get_custom_flag()
+            if custom_flag is not None:
+                provided_hash = hashlib.sha256(provided.encode()).hexdigest()
+                if custom_flag == provided_hash:
+                    return True
+            else:
+                account_id, challenge_id = unserialize_user_flag(provided)
         except BadSignature:
             return False
 
@@ -64,7 +71,7 @@ class DojoFlag(BaseFlag):
             raise FlagException("This flag is not for this challenge!")
 
         return True
-
+ 
 
 def shell_context_processor():
     import CTFd.models as ctfd_models
