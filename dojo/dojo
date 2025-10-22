@@ -20,6 +20,10 @@ fi
 case "$ACTION" in
     # HELP: up: bring the dojo up
     "up")
+        if [ -n "$DOCKER_USERNAME" ] && [ -n "$DOCKER_TOKEN" ]; then
+            echo "$DOCKER_TOKEN" | docker login --username "$DOCKER_USERNAME" --password-stdin
+        fi
+
         dojo sync
         dojo compose up -d --build --remove-orphans "$@"
         ;;
@@ -64,9 +68,24 @@ case "$ACTION" in
 
     # HELP: compose ARGS: run a docker compose command with the config.env file loaded
     "compose")
-        profile="main"
-        [ "$WORKSPACE_NODE" -gt 0 ] && profile="workspace"
-        docker compose --env-file=/data/config.env --profile "$profile" "$@"
+        profiles=()
+
+        multi_node=$(jq 'length > 0' /data/workspace_nodes.json 2>/dev/null || echo "unknown")
+        if [ "$WORKSPACE_NODE" -gt 0 ]; then
+            profiles+=("workspace")
+        elif [ "$multi_node" == "true" ]; then
+            profiles+=("main")
+        else
+            profiles+=("main" "workspace")
+        fi
+
+        [ "${ENABLE_SPLUNK}" = "true" ] && profiles+=("splunk")
+
+        args=(--env-file=/data/config.env)
+        for p in "${profiles[@]}"; do
+            args+=(--profile "$p")
+        done
+        docker compose "${args[@]}" "$@"
         ;;
 
     # HELP: node: run a dojo node command
@@ -131,6 +150,12 @@ case "$ACTION" in
         journalctl -u pwn.college -f --no-tail
         ;;
 
+    # HELP: load-dojo: load a dojo from a git repository
+    "load-dojo")
+        "$0" flask -- /opt/CTFd/CTFd/plugins/dojo_plugin/scripts/load_dojo.py -- "$@"
+        exit $?
+        ;;
+
     # HELP: wait: wait for the dojo to finish starting
     "wait")
         dojo logs | while IFS= read -r line; do
@@ -140,6 +165,9 @@ case "$ACTION" in
                     exit 0
                     ;;
                 *"Failed to start pwn.college.service - pwn.college docker compose service."*)
+                    exit 1
+                    ;;
+                *"Job pwn.college.service/start failed"*)
                     exit 1
                     ;;
             esac
@@ -165,7 +193,7 @@ case "$ACTION" in
         ;;
 
     *)
-        echo "Unknown command."
+        echo "Unknown command $0."
         echo ""
         "$0" help
         exit 1

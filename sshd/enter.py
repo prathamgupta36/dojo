@@ -80,7 +80,6 @@ def main():
 
         if status != "running":
             attempts += 1
-            print("\033c", end="")
             print("\r", " " * 80, f"\rConnecting -- instance status: {status}", end="")
             time.sleep(1)
             continue
@@ -95,6 +94,7 @@ def main():
                 container.execve_shell(cmd, user="1000", use_tty=tty)
             else:
                 command = [ssh_entrypoint, "-c", original_command] if original_command else [ssh_entrypoint]
+                environ = [] if "TERM" not in os.environ else [f"--env=TERM={os.environ['TERM']}"]
                 os.execve(
                     "/usr/bin/docker",
                     [
@@ -103,6 +103,7 @@ def main():
                         "-it" if tty else "-i",
                         "--user=1000",
                         "--workdir=/home/hacker",
+                        *environ,
                         container_name,
                         *command,
                     ],
